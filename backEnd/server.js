@@ -23,6 +23,10 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(bodyParser.json());
 
+app.get("/", (req, res) => {
+res.send("Welcome")  
+})
+
 // Multer setup for file upload handling
 const upload = multer({ storage: multer.memoryStorage() });
 
