@@ -1,43 +1,77 @@
-require('dotenv').config();
 const express = require('express');
 const admin = require('firebase-admin');
 const multer = require('multer');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const { db, bucket } = require('./firebase'); // Import Firebase configuration
 
-// Initialize Firebase Admin SDK with environment variables
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  }),
-  storageBucket: "employeesmanagement-fbcfb.appspot.com",
-});
-
-const db = admin.firestore();
-const bucket = admin.storage().bucket();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Middleware
 app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(bodyParser.json());
 
-app.get("/", (req, res) => {
-res.send("Welcome")  
-})
+// Sign-Up Endpoint
+app.post('/signup', async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body;
+    if (!email || !password) {
+      return res.status(400).send({ message: 'Email and password are required.' });
+    }
 
-// Multer setup for file upload handling
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName,
+    });
+
+    res.status(201).send({
+      message: 'User created successfully',
+      user: { uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName },
+    });
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Sign-In Endpoint
+app.post('/signin', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).send({ message: 'Email and password are required.' });
+    }
+
+    // Simulate Firebase Auth Login (server-side login without actual client authentication)
+    const userRecord = await admin.auth().getUserByEmail(email);
+
+    if (!userRecord) {
+      return res.status(404).send({ message: 'User not found.' });
+    }
+
+    res.status(200).send({
+      message: 'Signed in successfully',
+      user: { uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName },
+    });
+  } catch (error) {
+    console.error('Error signing in:', error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Multer setup for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Add Employee endpoint
+// Add Employee Endpoint
 app.post('/employees', upload.single('photo'), async (req, res) => {
   try {
     const { name, surname, age, idNumber, role } = req.body;
     const file = req.file;
 
     if (!name || !surname || !age || !idNumber || !role) {
-      return res.status(400).send({ message: 'All fields are required' });
+      return res.status(400).send({ message: 'All fields are required.' });
     }
 
     const employeeRef = db.collection('employees').doc();
@@ -58,14 +92,14 @@ app.post('/employees', upload.single('photo'), async (req, res) => {
       photoURL,
     });
 
-    res.status(201).send({ id: employeeRef.id, message: 'Employee added successfully' });
+    res.status(201).send({ id: employeeRef.id, message: 'Employee added successfully.' });
   } catch (error) {
     console.error('Error adding employee:', error);
     res.status(500).send({ message: 'Internal Server Error', error: error.message });
   }
 });
 
-// Get all employees endpoint
+// Fetch All Employees
 app.get('/employees', async (req, res) => {
   try {
     const snapshot = await db.collection('employees').get();
@@ -77,12 +111,12 @@ app.get('/employees', async (req, res) => {
   }
 });
 
-// Get employee by ID endpoint
+// Fetch Employee by ID
 app.get('/employees/:id', async (req, res) => {
   try {
     const employeeDoc = await db.collection('employees').doc(req.params.id).get();
     if (!employeeDoc.exists) {
-      return res.status(404).send({ message: 'Employee not found' });
+      return res.status(404).send({ message: 'Employee not found.' });
     }
     res.send({ id: employeeDoc.id, ...employeeDoc.data() });
   } catch (error) {
@@ -91,6 +125,7 @@ app.get('/employees/:id', async (req, res) => {
   }
 });
 
+// Start the Server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
