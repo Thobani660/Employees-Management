@@ -40,7 +40,8 @@ function SignIn() {
   };
 
   return (
-    <div style={styles.formContainer}>
+    <div style={{marginLeft:"500px"}}>
+        <div style={styles.formContainer}>
       <h2 style={styles.heading}>Sign In</h2>
       <input
         type="email"
@@ -63,6 +64,7 @@ function SignIn() {
       {error && <div style={styles.error}>{error}</div>}
       {successMessage && <div style={styles.success}>{successMessage}</div>}
     </div>
+    </div>
   );
 }
 
@@ -71,12 +73,11 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '20px',
-    backgroundColor: '#f9f9f9',
+    padding: '30px',
     borderRadius: '8px',
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
     width: '300px',
     margin: '0 auto',
+    background: "rgba(255, 255, 255, 0.4)",     backdropFilter: "blur(10px)", boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
   },
   heading: {
     fontSize: '24px',

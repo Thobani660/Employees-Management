@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import SearchHistory from './search';
+import { db, collection, addDoc, updateDoc, doc } from '../firebase'; // import Firebase functions
+
 
 function Side() {
   const [employees, setEmployees] = useState([]);
@@ -13,6 +15,7 @@ function Side() {
   const [image, setImage] = useState(null); // State to hold the uploaded image
   const [isUpdateFormVisible, setIsUpdateFormVisible] = useState(false);
   const [searchInput, setSearchInput] = useState('');
+  const [email, setEmail] = useState('')
 
   useEffect(() => {
     const storedEmployees = localStorage.getItem('employeesData');
@@ -43,54 +46,70 @@ function Side() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-
+  
     // Check for empty inputs
-    if (!name || !surname || !position  || !idnumber || !call || !image) {
+    if (!name || !surname || !position || !idnumber || !call || !image) {
       alert("Please fill in all fields before submitting.");
       return;
     }
-
+  
     const formData = {
       name,
       surname,
       position,
-      
       idnumber,
       call,
-      image 
+      image
     };
-
-    if (isUpdateFormVisible) {
-      const updatedEmployees = employees.map(emp =>
-        emp.name === employee.name ? formData : emp
-      );
-      setEmployees(updatedEmployees);
-      setFilteredEmployees(updatedEmployees);
-      localStorage.setItem('employeesData', JSON.stringify(updatedEmployees));
-      console.log("Updated employees data:", updatedEmployees);
-      alert("Employee updated successfully!");
-      setIsUpdateFormVisible(false);
-      setEmployee(null);
-      setImage(null);
-    } else {
-      const newEmployees = [...employees, formData];
-      setEmployees(newEmployees);
-      setFilteredEmployees(newEmployees); 
-      localStorage.setItem('employeesData', JSON.stringify(newEmployees));
-      console.log("New employees data stored:", newEmployees);
-      alert("Employee added successfully!");
-      setImage(null);
+  
+    try {
+      if (isUpdateFormVisible) {
+        // Update employee data in Firebase
+        const employeeDocRef = doc(db, "employees", employee.id); // Assuming `employee.id` is the document ID
+        await updateDoc(employeeDocRef, formData);
+  
+        // Update local state and localStorage
+        const updatedEmployees = employees.map(emp =>
+          emp.id === employee.id ? { ...emp, ...formData } : emp
+        );
+        setEmployees(updatedEmployees);
+        setFilteredEmployees(updatedEmployees);
+        localStorage.setItem('employeesData', JSON.stringify(updatedEmployees));
+        alert("Employee updated successfully!");
+  
+        // Reset form and hide update form
+        setIsUpdateFormVisible(false);
+        setEmployee(null);
+        setImage(null);
+      } else {
+        // Add new employee to Firebase
+        const docRef = await addDoc(collection(db, "employees"), formData);
+        const newEmployee = { ...formData, id: docRef.id }; // Add Firestore document ID
+  
+        // Update local state and localStorage
+        const newEmployees = [...employees, newEmployee];
+        setEmployees(newEmployees);
+        setFilteredEmployees(newEmployees);
+        localStorage.setItem('employeesData', JSON.stringify(newEmployees));
+        alert("Employee added successfully!");
+  
+        // Reset form
+        setImage(null);
+      }
+  
+      // Reset form fields
+      setName('');
+      setSurname('');
+      setPosition('');
+      setEmail('');
+      setIdnumber('');
+      setCall('');
+    } catch (error) {
+      console.error("Error adding/updating employee: ", error);
+      alert("An error occurred. Please try again.");
     }
-
-    // Reset form fields
-    setName('');
-    setSurname('');
-    setPosition('');
-    setEmail('');
-    setIdnumber('');
-    setCall('');
   };
 
   const handleDelete = (name) => {
@@ -178,13 +197,13 @@ function Side() {
                   <div className="middlecontainer">
                     <div>
                       <input
-                        type="text"
                         value={email}
-                        id="email"
-                        onChange={(event) => setEmail(event.target.value)}
-                        name="email"
                         className="position"
                         placeholder={"@Email"}
+                        type="email"
+                        id="email"
+                        name="email"
+                        onChange={(e) => setEmail(e.target.value)}
                       />
                       <input
                         type="text"

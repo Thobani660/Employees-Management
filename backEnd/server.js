@@ -1,131 +1,234 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const multer = require('multer');
 const bodyParser = require('body-parser');
-const cors = require('cors');
-const { db, bucket } = require('./firebase'); // Import Firebase configuration
+const multer = require('multer');
+
+// Initialize Firebase Admin SDK
+const serviceAccount = require('./serviceAccountKey.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://<your-project-id>.firebaseio.com",
+  storageBucket: "<your-project-id>.appspot.com",
+});
+
+const db = admin.firestore();
+const bucket = admin.storage().bucket();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Sign-Up Endpoint
-app.post('/signup', async (req, res) => {
-  try {
-    const { email, password, displayName } = req.body;
-    if (!email || !password) {
-      return res.status(400).send({ message: 'Email and password are required.' });
-    }
-
-    const userRecord = await admin.auth().createUser({
-      email,
-      password,
-      displayName,
-    });
-
-    res.status(201).send({
-      message: 'User created successfully',
-      user: { uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName },
-    });
-  } catch (error) {
-    console.error('Error creating user:', error);
-    res.status(500).send({ message: error.message });
-  }
-});
-
-// Sign-In Endpoint
-app.post('/signin', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).send({ message: 'Email and password are required.' });
-    }
-
-    // Simulate Firebase Auth Login (server-side login without actual client authentication)
-    const userRecord = await admin.auth().getUserByEmail(email);
-
-    if (!userRecord) {
-      return res.status(404).send({ message: 'User not found.' });
-    }
-
-    res.status(200).send({
-      message: 'Signed in successfully',
-      user: { uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName },
-    });
-  } catch (error) {
-    console.error('Error signing in:', error);
-    res.status(500).send({ message: error.message });
-  }
-});
-
-// Multer setup for file uploads
+// Set up Multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Add Employee Endpoint
-app.post('/employees', upload.single('photo'), async (req, res) => {
+// Routes
+
+// Test Route
+app.get('/', (req, res) => {
+  res.send('Employee Management Server is Running!');
+});
+
+// Add an Employee
+app.post('/addEmployee', upload.single('image'), async (req, res) => {
   try {
-    const { name, surname, age, idNumber, role } = req.body;
+    const { id, name, email, position } = req.body;
     const file = req.file;
 
-    if (!name || !surname || !age || !idNumber || !role) {
-      return res.status(400).send({ message: 'All fields are required.' });
+    if (!file) {
+      return res.status(400).send('No image file uploaded');
     }
 
-    const employeeRef = db.collection('employees').doc();
-    let photoURL = '';
+    const fileName = `${Date.now()}_${file.originalname}`;
+    const fileUpload = bucket.file(fileName);
 
-    if (file) {
-      const blob = bucket.file(`employees/${employeeRef.id}/${file.originalname}`);
-      await blob.save(file.buffer, { contentType: file.mimetype });
-      photoURL = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-    }
-
-    await employeeRef.set({
-      name,
-      surname,
-      age,
-      idNumber,
-      role,
-      photoURL,
+    await fileUpload.save(file.buffer, {
+      contentType: file.mimetype,
+      public: true,
+      metadata: { firebaseStorageDownloadTokens: fileName },
     });
 
-    res.status(201).send({ id: employeeRef.id, message: 'Employee added successfully.' });
+    const imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileUpload.name}`;
+
+    // Save employee data to Firestore
+    await db.collection('employees').doc(id).set({
+      name,
+      email,
+      position,
+      image: imageUrl, // Save the image URL
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).send('Employee added successfully');
   } catch (error) {
-    console.error('Error adding employee:', error);
-    res.status(500).send({ message: 'Internal Server Error', error: error.message });
+    res.status(500).send(error.message);
   }
 });
 
-// Fetch All Employees
+// Get All Employees
 app.get('/employees', async (req, res) => {
   try {
     const snapshot = await db.collection('employees').get();
-    const employees = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.send(employees);
+    const employees = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json(employees);
   } catch (error) {
-    console.error('Error getting employees:', error);
-    res.status(500).send({ message: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Fetch Employee by ID
-app.get('/employees/:id', async (req, res) => {
+// Get Employee by ID
+app.get('/employee/:id', async (req, res) => {
   try {
-    const employeeDoc = await db.collection('employees').doc(req.params.id).get();
-    if (!employeeDoc.exists) {
-      return res.status(404).send({ message: 'Employee not found.' });
+    const { id } = req.params;
+    const doc = await db.collection('employees').doc(id).get();
+    if (!doc.exists) {
+      return res.status(404).send('Employee not found');
     }
-    res.send({ id: employeeDoc.id, ...employeeDoc.data() });
+    res.status(200).json({ id: doc.id, ...doc.data() });
   } catch (error) {
-    console.error('Error getting employee:', error);
-    res.status(500).send({ message: error.message });
+    res.status(500).send(error.message);
   }
 });
 
-// Start the Server
+// Update an Employee
+app.put('/employees/:id', upload.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, position } = req.body;
+    const file = req.file;
+
+    // Get current employee data
+    const docRef = db.collection('employees').doc(id);
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      return res.status(404).send('Employee not found');
+    }
+
+    let updatedData = { name, email, position };
+
+    // If there is a new image, upload and update the image URL
+    if (file) {
+      const fileName = `${Date.now()}_${file.originalname}`;
+      const fileUpload = bucket.file(fileName);
+      
+      await fileUpload.save(file.buffer, {
+        contentType: file.mimetype,
+        public: true,
+        metadata: { firebaseStorageDownloadTokens: fileName },
+      });
+
+      updatedData.image = `https://storage.googleapis.com/${bucket.name}/${fileUpload.name}`;
+    }
+
+    updatedData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+
+    // Update employee data in Firestore
+    await docRef.update(updatedData);
+
+    res.status(200).json({ id, ...updatedData });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete an Employee
+app.delete('/employees/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const docRef = db.collection('employees').doc(id);
+
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    await docRef.delete();
+
+    res.status(200).json({ message: 'Employee deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Search Employee by Name
+app.get('/search', async (req, res) => {
+  try {
+    const { name } = req.query;
+    const snapshot = await db.collection('employees').where('name', '==', name).get();
+    if (snapshot.empty) {
+      return res.status(404).send('No matching employees found');
+    }
+
+    const results = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.status(200).json(results);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// File Upload to Firebase Storage (Optional standalone route)
+app.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    const blob = bucket.file(`uploads/${file.originalname}`);
+    const stream = blob.createWriteStream({
+      metadata: { contentType: file.mimetype },
+    });
+
+    stream.end(file.buffer);
+    stream.on('finish', async () => {
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+      res.status(200).send({ message: 'File uploaded successfully', url: publicUrl });
+    });
+
+    stream.on('error', (error) => {
+      res.status(500).send(error.message);
+    });
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// Sign up user (store user data in Firestore)
+app.post('/signup', async (req, res) => {
+  try {
+    const { email, password, name, position } = req.body;
+
+    if (!email || !password || !name || !position) {
+      return res.status(400).send('All fields are required');
+    }
+
+    // Create user in Firebase Authentication (if using email/password auth)
+    const userRecord = await admin.auth().createUser({
+      email: email,
+      password: password,
+      displayName: name,
+    });
+
+    // Save user data to Firestore
+    const userRef = db.collection('users').doc(userRecord.uid);
+    await userRef.set({
+      email: email,
+      name: name,
+      position: position,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).send('User registered successfully');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send(error.message);
+  }
+});
+
+// Start Server
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
