@@ -1,15 +1,20 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const bodyParser = require('body-parser');
+const cors = require('cors');
+const { auth } = require('./config/firebase');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const multer = require('multer');
+require("dotenv").config()
+const firebase = require('firebase-admin');
 
 // Initialize Firebase Admin SDK
 const serviceAccount = require('./serviceAccountKey.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://<your-project-id>.firebaseio.com",
-  storageBucket: "<your-project-id>.appspot.com",
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
 const db = admin.firestore();
@@ -19,6 +24,7 @@ const app = express();
 const PORT = 5000;
 
 // Middleware
+app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -173,60 +179,56 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// File Upload to Firebase Storage (Optional standalone route)
-app.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    const file = req.file;
-    const blob = bucket.file(`uploads/${file.originalname}`);
-    const stream = blob.createWriteStream({
-      metadata: { contentType: file.mimetype },
-    });
 
-    stream.end(file.buffer);
-    stream.on('finish', async () => {
-      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-      res.status(200).send({ message: 'File uploaded successfully', url: publicUrl });
-    });
 
-    stream.on('error', (error) => {
-      res.status(500).send(error.message);
-    });
-  } catch (error) {
-    res.status(500).send(error.message);
+// Firebase Authentication: Sign In
+app.post('/signin', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).send('Email and password are required');
   }
-});
 
-// Sign up user (store user data in Firestore)
-app.post('/signup', async (req, res) => {
   try {
-    const { email, password, name, position } = req.body;
+    // Firebase Admin SDK doesn't directly verify passwords. This should be handled on the frontend with Firebase Client SDK.
+    // If you need to use Firebase Admin SDK to verify the user by UID, use the method below:
+    
+    const user = await admin.auth().getUserByEmail(email);
 
-    if (!email || !password || !name || !position) {
-      return res.status(400).send('All fields are required');
+    if (!user) {
+      return res.status(404).send('User not found');
     }
 
-    // Create user in Firebase Authentication (if using email/password auth)
-    const userRecord = await admin.auth().createUser({
-      email: email,
-      password: password,
-      displayName: name,
-    });
-
-    // Save user data to Firestore
-    const userRef = db.collection('users').doc(userRecord.uid);
-    await userRef.set({
-      email: email,
-      name: name,
-      position: position,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.status(200).send('User registered successfully');
+    // Assuming password validation is handled on the client-side (use Firebase Client SDK).
+    res.status(200).json({ message: 'Signed in successfully', uid: user.uid });
   } catch (error) {
     console.error(error);
     res.status(500).send(error.message);
   }
 });
+
+// Firebase Authentication: Sign Up
+app.post('/signup', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    // Create a new user with Firebase Authentication
+    const userRecord = await auth.createUser ({
+      email: email,
+      password: password,
+    });
+
+    // Respond with success
+    res.status(201).json({ message: 'User  created successfully!', uid: userRecord.uid });
+  } catch (error) {
+    // Handle errors
+    console.error('Error creating new user:', error);
+    res.status(400).json({ message: error.message });
+  }
+});
+  
+
+
 
 // Start Server
 app.listen(PORT, () => {
